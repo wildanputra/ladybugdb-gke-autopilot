@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: ladybugdb-pv
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  claimRef:
+    namespace: ladybugdb
+    name: ladybugdb-pvc
+  csi:
+    driver: gcsfuse.csi.storage.gke.io
+    # Replace BUCKET_NAME with your GCS bucket name
+    volumeHandle: BUCKET_NAME
+    volumeAttributes:
+      # Write directory entries implicitly for non-existent path components
+      mountOptions: "implicit-dirs"
+      gcsfuseLoggingSeverity: warning
+      # Cache metadata for 60 seconds to improve performance
+      metadataCacheTtlSeconds: "60"
+      # -1 disables file cache capacity limit (uses all available memory)
+      fileCacheCapacity: "-1"

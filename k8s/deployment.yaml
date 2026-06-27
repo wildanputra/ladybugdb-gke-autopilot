@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ladybugdb-explorer
+  namespace: ladybugdb
+  labels:
+    app: ladybugdb-explorer
+spec:
+  # LadybugDB is an embedded database — only one writer replica is safe.
+  # For read-only replicas see the scale-readonly target in the Makefile.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ladybugdb-explorer
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: ladybugdb-explorer
+      annotations:
+        # Required to enable the Cloud Storage FUSE CSI sidecar injection
+        gke-gcsfuse/volumes: "true"
+        gke-gcsfuse/cpu-limit: "250m"
+        gke-gcsfuse/memory-limit: "256Mi"
+        gke-gcsfuse/ephemeral-storage-limit: "5Gi"
+    spec:
+      serviceAccountName: ladybugdb-sa
+      securityContext:
+        runAsNonRoot: false
+      containers:
+        - name: explorer
+          image: ghcr.io/ladybugdb/explorer:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          env:
+            - name: LBUG_FILE
+              value: database.lbdb
+            - name: MODE
+              value: READ_WRITE
+            - name: LBUG_BUFFER_POOL_SIZE
+              value: "1073741824"
+          volumeMounts:
+            - name: gcs-database
+              mountPath: /database
+          resources:
+            # GKE Autopilot requires explicit resource requests
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+              ephemeral-storage: "1Gi"
+            limits:
+              memory: "2Gi"
+              ephemeral-storage: "2Gi"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+      volumes:
+        - name: gcs-database
+          persistentVolumeClaim:
+            claimName: ladybugdb-pvc
