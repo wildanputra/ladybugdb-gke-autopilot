@@ -8,3 +8,5 @@ resources:
   - pvc.yaml
   - deployment.yaml
   - service.yaml
+  - mcp-server-deployment.yaml
+  - mcp-server-service.yaml

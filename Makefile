@@ -15,19 +15,21 @@ export
 NAMESPACE   ?= ladybugdb
 KUBE_APPLY  := kubectl apply -f
 
-.PHONY: help setup-gcp deploy destroy status port-forward \
-        rollout-status patch-sa patch-pv
+.PHONY: help setup-gcp deploy destroy status port-forward port-forward-mcp \
+        rollout rollout-mcp patch-sa patch-pv
 
 help:
 	@echo ""
 	@echo "LadybugDB GKE Autopilot — available targets"
 	@echo "--------------------------------------------"
-	@echo "  setup-gcp    Provision GCP resources (bucket, SA, Workload Identity, cluster)"
-	@echo "  deploy       Apply all Kubernetes manifests"
-	@echo "  status       Show pod and service status"
-	@echo "  rollout      Wait for deployment rollout to complete"
-	@echo "  port-forward Forward localhost:8000 to the LadybugDB Explorer pod"
-	@echo "  destroy      Remove all Kubernetes and GCP resources (irreversible!)"
+	@echo "  setup-gcp         Provision GCP resources (bucket, SA, Workload Identity, cluster)"
+	@echo "  deploy            Apply all Kubernetes manifests"
+	@echo "  status            Show pod and service status"
+	@echo "  rollout           Wait for Explorer deployment rollout to complete"
+	@echo "  rollout-mcp       Wait for MCP server deployment rollout to complete"
+	@echo "  port-forward      Forward localhost:8000 to the LadybugDB Explorer"
+	@echo "  port-forward-mcp  Forward localhost:8080 to the LadybugDB MCP server"
+	@echo "  destroy           Remove all Kubernetes and GCP resources (irreversible!)"
 	@echo ""
 
 # ---------------------------------------------------------------------------
@@ -46,8 +48,10 @@ deploy: _check-env patch-sa patch-pv
 	$(KUBE_APPLY) k8s/pvc.yaml
 	$(KUBE_APPLY) k8s/deployment.yaml
 	$(KUBE_APPLY) k8s/service.yaml
+	$(KUBE_APPLY) k8s/mcp-server-deployment.yaml
+	$(KUBE_APPLY) k8s/mcp-server-service.yaml
 	@echo ""
-	@echo "Deployment submitted. Run 'make rollout' to wait for pods to be ready."
+	@echo "Deployment submitted. Run 'make rollout' and 'make rollout-mcp' to wait for pods."
 
 patch-sa:
 	@echo "==> Patching serviceaccount.yaml with PROJECT_ID=${PROJECT_ID}"
@@ -59,6 +63,9 @@ patch-pv:
 
 rollout:
 	kubectl rollout status deployment/ladybugdb-explorer -n $(NAMESPACE)
+
+rollout-mcp:
+	kubectl rollout status deployment/ladybugdb-mcp-server -n $(NAMESPACE)
 
 status:
 	@echo "=== Pods ==="
@@ -74,6 +81,11 @@ port-forward:
 	@echo "Open http://localhost:8000 to access LadybugDB Explorer"
 	kubectl port-forward -n $(NAMESPACE) \
 	  svc/ladybugdb-explorer 8000:80
+
+port-forward-mcp:
+	@echo "MCP SSE endpoint: http://localhost:8080/sse"
+	kubectl port-forward -n $(NAMESPACE) \
+	  svc/ladybugdb-mcp-server 8080:80
 
 destroy:
 	@bash scripts/teardown.sh
