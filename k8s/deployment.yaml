@@ -6,8 +6,6 @@ metadata:
   labels:
     app: ladybugdb-explorer
 spec:
-  # LadybugDB is an embedded database — only one writer replica is safe.
-  # For read-only replicas see the scale-readonly target in the Makefile.
   replicas: 1
   selector:
     matchLabels:
@@ -26,8 +24,6 @@ spec:
         gke-gcsfuse/ephemeral-storage-limit: "5Gi"
     spec:
       serviceAccountName: ladybugdb-sa
-      securityContext:
-        runAsNonRoot: false
       containers:
         - name: explorer
           image: ghcr.io/ladybugdb/explorer:latest

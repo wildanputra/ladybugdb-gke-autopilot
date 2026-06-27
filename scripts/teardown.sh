@@ -33,7 +33,7 @@ kubectl delete namespace "${NAMESPACE}" --ignore-not-found=true
 kubectl delete pv ladybugdb-pv --ignore-not-found=true
 
 echo "==> Deleting GCS bucket: gs://${BUCKET_NAME}"
-gsutil -m rm -r "gs://${BUCKET_NAME}" || true
+gcloud storage rm --recursive "gs://${BUCKET_NAME}" || true
 
 echo "==> Deleting GCP Service Account: ${GSA_EMAIL}"
 gcloud iam service-accounts delete "${GSA_EMAIL}" \

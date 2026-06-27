@@ -12,31 +12,31 @@ Deploy [LadybugDB](https://ladybugdb.com) — an embedded columnar graph databas
                          │  │   Pod: ladybugdb-explorer (READ_WRITE)     │ │
                          │  │   ghcr.io/ladybugdb/explorer:latest        │ │
                          │  │   port 8000  →  svc/ladybugdb-explorer:80  │ │
-                         │  │   /database/database.lbdb  (read-write)    │ │
-                         │  └──────────────────┬─────────────────────────┘ │
-                         │                     │                            │
-  AI Agent / MCP ──────► │  ┌──────────────────┼─────────────────────────┐ │
-  Client                 │  │   Pod: ladybugdb-mcp-server (read-only)    │ │
-                         │  │   ghcr.io/ladybugdb/mcp-server-ladybug     │ │
+                         │  │   /database/database.lbdb  (GCS Fuse)      │ │
+                         │  └──────────────┬───────────────┬─────────────┘ │
+                         │                 │ HTTP /api/cypher               │
+  AI Agent / MCP ──────► │  ┌──────────────▼─────────────────────────────┐ │
+  Client                 │  │   Pod: ladybugdb-mcp-server                │ │
+                         │  │   built from LadybugDB/mcp-server-ladybug  │ │
                          │  │   port 8080  →  svc/ladybugdb-mcp-server:80│ │
-                         │  │   /database/database.lbdb  (read-only)     │ │
-                         │  └──────────────────┬─────────────────────────┘ │
-                         │                     │                            │
-                         │          gcsfuse sidecars (injected by GKE)     │
-                         └─────────────────────┼────────────────────────────┘
-                                               │ FUSE mount
-                                               ▼
-                                      ┌─────────────────┐
-                                      │  GCS Bucket     │
-                                      │  database.lbdb  │
-                                      └─────────────────┘
+                         │  │   (no direct DB access — proxies Explorer) │ │
+                         │  └────────────────────────────────────────────┘ │
+                         │                 │                                │
+                         │     gcsfuse sidecar (Explorer pod only)         │
+                         └─────────────────┼────────────────────────────────┘
+                                           │ FUSE mount
+                                           ▼
+                                  ┌─────────────────┐
+                                  │  GCS Bucket     │
+                                  │  database.lbdb  │
+                                  └─────────────────┘
 ```
 
 **Key design decisions:**
 
 - **Single writer**: LadybugDB is an embedded database. Running multiple write-capable replicas against the same file will corrupt data. The Explorer deployment is locked to `replicas: 1` with a `Recreate` strategy.
-- **MCP server is read-only**: The MCP server mounts the same GCS-backed PVC with `readOnly: true`, so AI agents can query the graph without risking write conflicts with the Explorer.
-- **GCS FUSE CSI driver**: Enabled by default on GKE Autopilot clusters. The sidecar container is injected automatically via the pod annotation `gke-gcsfuse/volumes: "true"`.
+- **MCP server proxies Explorer**: The MCP server does not mount the GCS volume or open the database file directly. It forwards all Cypher queries to the Explorer's internal HTTP API (`/api/cypher`). This avoids WAL corruption from concurrent embedded database access via GCS Fuse.
+- **GCS FUSE CSI driver**: Enabled by default on GKE Autopilot clusters. The sidecar container is injected automatically via the pod annotation `gke-gcsfuse/volumes: "true"` (Explorer pod only).
 - **Workload Identity**: The Kubernetes Service Account is bound to a GCP Service Account that has `storage.objectAdmin` on the GCS bucket — no long-lived credentials in the cluster.
 
 ## Repository structure
@@ -182,13 +182,9 @@ kubectl port-forward -n ladybugdb svc/ladybugdb-mcp-server 8080:80
 
 ### Scaling
 
-LadybugDB Explorer supports a read-only mode (`MODE=READ_ONLY`). You can run additional read-only pods that mount the GCS bucket in read-only mode:
+LadybugDB is an embedded database with a single writer. The Explorer runs with `replicas: 1` and `strategy: Recreate` to ensure only one instance holds the GCS Fuse file lock at a time.
 
-```bash
-kubectl scale deployment/ladybugdb-explorer --replicas=1 -n ladybugdb  # writer
-```
-
-To add read-only replicas, duplicate `k8s/deployment.yaml`, set `MODE: READ_ONLY` and add `readOnly: true` to the `volumeMount`.
+AI agents query the database through the MCP server, which proxies requests to the Explorer internally. No additional scaling configuration is needed for read traffic.
 
 ### Backup
 
@@ -196,11 +192,12 @@ Because the database lives in GCS with versioning enabled, you can restore any p
 
 ```bash
 # List object versions
-gsutil ls -a gs://${BUCKET_NAME}/database.lbdb
+gcloud storage ls --all-versions gs://${BUCKET_NAME}/database.lbdb
 
-# Restore a specific version
-gsutil cp "gs://${BUCKET_NAME}/database.lbdb#<generation>" \
-          gs://${BUCKET_NAME}/database.lbdb
+# Restore a specific generation
+gcloud storage cp \
+  "gs://${BUCKET_NAME}/database.lbdb#<generation>" \
+  gs://${BUCKET_NAME}/database.lbdb
 ```
 
 ### Updating LadybugDB
@@ -276,6 +273,7 @@ gcloud iam service-accounts get-iam-policy \
 - [LadybugDB documentation](https://docs.ladybugdb.com)
 - [LadybugDB GitHub](https://github.com/LadybugDB/ladybug)
 - [LadybugDB Explorer Docker image](https://github.com/LadybugDB/explorer)
+- [LadybugDB MCP server source](https://github.com/LadybugDB/mcp-server-ladybug)
 - [GKE Cloud Storage FUSE CSI driver](https://cloud.google.com/kubernetes-engine/docs/how-to/persistent-volumes/cloud-storage-fuse-csi-driver)
 - [GKE Autopilot overview](https://cloud.google.com/kubernetes-engine/docs/concepts/autopilot-overview)
 - [Workload Identity for GKE](https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity)
