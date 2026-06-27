@@ -5,37 +5,37 @@ Deploy [LadybugDB](https://ladybugdb.com) — an embedded columnar graph databas
 ## Architecture
 
 ```
-                         ┌────────────────────────────────────┐
-                         │       GKE Autopilot Cluster        │
-                         │                                    │
-  User/Application ────► │  ┌──────────────────────────────┐ │
-                         │  │   Pod: ladybugdb-explorer     │ │
-                         │  │                               │ │
-                         │  │  ┌─────────────────────────┐ │ │
-                         │  │  │  Explorer container     │ │ │
-                         │  │  │  ghcr.io/ladybugdb/     │ │ │
-                         │  │  │  explorer:latest        │ │ │
-                         │  │  │  port 8000              │ │ │
-                         │  │  │  /database/database.lbdb│ │ │
-                         │  │  └──────────┬──────────────┘ │ │
-                         │  │             │ volumeMount     │ │
-                         │  │  ┌──────────▼──────────────┐ │ │
-                         │  │  │  gcsfuse sidecar        │ │ │
-                         │  │  │  (injected by GKE)      │ │ │
-                         │  │  └──────────┬──────────────┘ │ │
-                         │  └─────────────│────────────────┘ │
-                         └────────────────│────────────────────┘
-                                          │ FUSE mount
-                                          ▼
-                                 ┌─────────────────┐
-                                 │  GCS Bucket     │
-                                 │  database.lbdb  │
-                                 └─────────────────┘
+                         ┌──────────────────────────────────────────────────┐
+                         │              GKE Autopilot Cluster               │
+                         │                                                  │
+  Browser / UI ────────► │  ┌────────────────────────────────────────────┐ │
+                         │  │   Pod: ladybugdb-explorer (READ_WRITE)     │ │
+                         │  │   ghcr.io/ladybugdb/explorer:latest        │ │
+                         │  │   port 8000  →  svc/ladybugdb-explorer:80  │ │
+                         │  │   /database/database.lbdb  (read-write)    │ │
+                         │  └──────────────────┬─────────────────────────┘ │
+                         │                     │                            │
+  AI Agent / MCP ──────► │  ┌──────────────────┼─────────────────────────┐ │
+  Client                 │  │   Pod: ladybugdb-mcp-server (read-only)    │ │
+                         │  │   ghcr.io/ladybugdb/mcp-server-ladybug     │ │
+                         │  │   port 8080  →  svc/ladybugdb-mcp-server:80│ │
+                         │  │   /database/database.lbdb  (read-only)     │ │
+                         │  └──────────────────┬─────────────────────────┘ │
+                         │                     │                            │
+                         │          gcsfuse sidecars (injected by GKE)     │
+                         └─────────────────────┼────────────────────────────┘
+                                               │ FUSE mount
+                                               ▼
+                                      ┌─────────────────┐
+                                      │  GCS Bucket     │
+                                      │  database.lbdb  │
+                                      └─────────────────┘
 ```
 
 **Key design decisions:**
 
-- **Single writer**: LadybugDB is an embedded database. Running multiple write-capable replicas against the same file will corrupt data. The deployment is locked to `replicas: 1` with a `Recreate` strategy.
+- **Single writer**: LadybugDB is an embedded database. Running multiple write-capable replicas against the same file will corrupt data. The Explorer deployment is locked to `replicas: 1` with a `Recreate` strategy.
+- **MCP server is read-only**: The MCP server mounts the same GCS-backed PVC with `readOnly: true`, so AI agents can query the graph without risking write conflicts with the Explorer.
 - **GCS FUSE CSI driver**: Enabled by default on GKE Autopilot clusters. The sidecar container is injected automatically via the pod annotation `gke-gcsfuse/volumes: "true"`.
 - **Workload Identity**: The Kubernetes Service Account is bound to a GCP Service Account that has `storage.objectAdmin` on the GCS bucket — no long-lived credentials in the cluster.
 
@@ -51,8 +51,10 @@ Deploy [LadybugDB](https://ladybugdb.com) — an embedded columnar graph databas
 │   ├── serviceaccount.yaml   # K8s SA with Workload Identity annotation
 │   ├── pv.yaml               # PersistentVolume → GCS bucket
 │   ├── pvc.yaml              # PersistentVolumeClaim
-│   ├── deployment.yaml       # LadybugDB Explorer deployment
-│   └── service.yaml          # ClusterIP service
+│   ├── deployment.yaml           # LadybugDB Explorer deployment (READ_WRITE)
+│   ├── service.yaml              # ClusterIP service for Explorer
+│   ├── mcp-server-deployment.yaml  # LadybugDB MCP server (read-only)
+│   └── mcp-server-service.yaml     # ClusterIP service for MCP server
 └── scripts/
     ├── setup-gcp.sh          # Provision GCP resources
     └── teardown.sh           # Remove all resources
@@ -122,6 +124,36 @@ Edit `k8s/service.yaml`, uncomment the `LoadBalancer` service block, then:
 kubectl apply -f k8s/service.yaml -n ladybugdb
 kubectl get svc ladybugdb-explorer-lb -n ladybugdb
 # Wait for EXTERNAL-IP, then open http://<EXTERNAL-IP>
+```
+
+### 5. Access the MCP server
+
+The MCP server exposes an SSE endpoint for AI agents and MCP clients.
+
+**From inside the cluster** (e.g. another pod or agent):
+
+```
+http://ladybugdb-mcp-server.ladybugdb.svc.cluster.local/sse
+```
+
+**Port-forward for local testing:**
+
+```bash
+kubectl port-forward -n ladybugdb svc/ladybugdb-mcp-server 8080:80
+# Connect your MCP client to: http://localhost:8080/sse
+```
+
+**Claude Desktop / MCP client config example:**
+
+```json
+{
+  "mcpServers": {
+    "ladybugdb": {
+      "transport": "sse",
+      "url": "http://localhost:8080/sse"
+    }
+  }
+}
 ```
 
 ## Configuration reference
