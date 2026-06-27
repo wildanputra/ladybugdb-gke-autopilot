@@ -44,8 +44,7 @@ if ! gcloud container clusters describe "${CLUSTER_NAME}" \
   echo "==> Creating GKE Autopilot cluster: ${CLUSTER_NAME}"
   gcloud container clusters create-auto "${CLUSTER_NAME}" \
     --region "${REGION}" \
-    --project "${PROJECT_ID}" \
-    --workload-pool="${PROJECT_ID}.svc.id.goog"
+    --project "${PROJECT_ID}"
 else
   echo "==> Cluster ${CLUSTER_NAME} already exists, skipping creation"
 fi
@@ -58,29 +57,16 @@ gcloud container clusters get-credentials "${CLUSTER_NAME}" \
 # ---------------------------------------------------------------------------
 # GCS bucket
 # ---------------------------------------------------------------------------
-if ! gsutil ls -b "gs://${BUCKET_NAME}" 2>/dev/null; then
+if ! gcloud storage buckets describe "gs://${BUCKET_NAME}" --quiet 2>/dev/null; then
   echo "==> Creating GCS bucket: gs://${BUCKET_NAME}"
-  gsutil mb -p "${PROJECT_ID}" -l "${REGION}" "gs://${BUCKET_NAME}"
-  gsutil versioning set on "gs://${BUCKET_NAME}"
-  gsutil lifecycle set - "gs://${BUCKET_NAME}" <<'EOF'
-{
-  "rule": [
-    {
-      "action": {"type": "Delete"},
-      "condition": {
-        "age": 30,
-        "isLive": false
-      }
-    }
-  ]
-}
-EOF
+  gcloud storage buckets create "gs://${BUCKET_NAME}" \
+    --project "${PROJECT_ID}" \
+    --location "${REGION}" \
+    --uniform-bucket-level-access
+  gcloud storage buckets update "gs://${BUCKET_NAME}" --versioning
 else
   echo "==> Bucket gs://${BUCKET_NAME} already exists, skipping"
 fi
-
-# Prevent public access
-gsutil pap set enforced "gs://${BUCKET_NAME}"
 
 # ---------------------------------------------------------------------------
 # GCP Service Account
@@ -95,8 +81,9 @@ else
 fi
 
 echo "==> Granting ${GSA_EMAIL} read/write access to gs://${BUCKET_NAME}"
-gsutil iam ch "serviceAccount:${GSA_EMAIL}:roles/storage.objectAdmin" \
-  "gs://${BUCKET_NAME}"
+gcloud storage buckets add-iam-policy-binding "gs://${BUCKET_NAME}" \
+  --member "serviceAccount:${GSA_EMAIL}" \
+  --role "roles/storage.objectAdmin"
 
 # ---------------------------------------------------------------------------
 # Workload Identity binding

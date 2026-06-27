@@ -14,11 +14,11 @@ spec:
     name: ladybugdb-pvc
   csi:
     driver: gcsfuse.csi.storage.gke.io
-    # Replace BUCKET_NAME with your GCS bucket name
-    volumeHandle: BUCKET_NAME
+    # Replace ladybugdb-database-playground with your GCS bucket name
+    volumeHandle: ladybugdb-database-playground
     volumeAttributes:
       # Write directory entries implicitly for non-existent path components
-      mountOptions: "implicit-dirs"
+      mountOptions: "implicit-dirs,dir-mode=0777,file-mode=0666"
       gcsfuseLoggingSeverity: warning
       # Cache metadata for 60 seconds to improve performance
       metadataCacheTtlSeconds: "60"

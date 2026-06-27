@@ -55,11 +55,11 @@ deploy: _check-env patch-sa patch-pv
 
 patch-sa:
 	@echo "==> Patching serviceaccount.yaml with PROJECT_ID=${PROJECT_ID}"
-	sed -i "s/PROJECT_ID/${PROJECT_ID}/g" k8s/serviceaccount.yaml
+	sed -i '' "s/PROJECT_ID/${PROJECT_ID}/g" k8s/serviceaccount.yaml
 
 patch-pv:
 	@echo "==> Patching pv.yaml with BUCKET_NAME=${BUCKET_NAME}"
-	sed -i "s/BUCKET_NAME/${BUCKET_NAME}/g" k8s/pv.yaml
+	sed -i '' "s/BUCKET_NAME/${BUCKET_NAME}/g" k8s/pv.yaml
 
 rollout:
 	kubectl rollout status deployment/ladybugdb-explorer -n $(NAMESPACE)
