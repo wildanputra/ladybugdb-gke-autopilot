@@ -260,9 +260,29 @@ kubectl logs -n ladybugdb \
   -c gke-gcsfuse-sidecar
 ```
 
-**Permission denied on GCS bucket**
+**Permission denied opening database file**
 
-Re-run the Workload Identity binding in `scripts/setup-gcp.sh` or verify:
+This is a filesystem-level issue with the GCS FUSE mount, not a GCS IAM issue. The FUSE sidecar mounts bucket objects with root ownership by default, but the Explorer container runs as a non-root user. Verify `k8s/pv.yaml` has the correct mount options:
+
+```yaml
+mountOptions: "implicit-dirs,dir-mode=0777,file-mode=0666"
+```
+
+If the PV was created without these options, you must delete and recreate it (PV specs are immutable):
+
+```bash
+kubectl scale deployment ladybugdb-explorer -n ladybugdb --replicas=0
+kubectl delete pvc ladybugdb-pvc -n ladybugdb
+kubectl patch pvc ladybugdb-pvc -n ladybugdb -p '{"metadata":{"finalizers":[]}}' --type=merge 2>/dev/null || true
+kubectl delete pv ladybugdb-pv 2>/dev/null || true
+kubectl apply -f k8s/pv.yaml
+kubectl apply -f k8s/pvc.yaml
+kubectl scale deployment ladybugdb-explorer -n ladybugdb --replicas=1
+```
+
+**Permission denied on GCS bucket (IAM)**
+
+If the FUSE sidecar itself fails to mount (check sidecar logs), re-run the Workload Identity binding in `scripts/setup-gcp.sh` or verify:
 ```bash
 gcloud iam service-accounts get-iam-policy \
   ${GSA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com
